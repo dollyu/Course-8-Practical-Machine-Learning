@@ -1,0 +1,132 @@
+---
+title: "Practical Machine Learning Project"
+author: "Dorothea L. Ugi"
+date: "January 28, 2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, warning=FALSE, message=FALSE, fig.height=5, fig.width=10)
+options(width=120)
+setwd("~/coursera/Course8")
+#install.packages("caret")
+#install.packages("corrplot")
+#install.packages("rattle")
+#install.packages("e1071")
+
+library(readr)
+library(dplyr)
+library(caret)
+library(corrplot)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(RColorBrewer)
+library(ggplot2)
+library(rattle)
+library(e1071)
+```
+
+# Practical Machine Learning Course Project
+# Build model to predict how well weight lifting exercises are being done
+## Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+## Loading Data
+```{r, warning=FALSE}
+trainRaw <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+testRaw <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+dim(trainRaw); dim(testRaw)
+```
+
+## Cleaning Data
+Remove columns which have a lot of missing data or Near Zero Variance variables
+```{r}
+NZV <- nearZeroVar(trainRaw, saveMetrics=TRUE)
+head(NZV, 20)
+training1 <- trainRaw[, !NZV$nzv]
+testing1 <- testRaw[, !NZV$nzv]
+dim(training1); dim(testing1)
+```
+
+Removing additional columns not needed: X, user_name and timestamp columns which will leave 95 columns
+```{r}
+removeColumns <- grepl("^X|timestamp|user_name", names(training1))
+training <- training1[, !removeColumns]
+testing <- testing1[, !removeColumns]
+dim(training); dim(testing)
+```
+
+Finally remove columns that contain NAs
+```{r}
+goodCols <- (colSums(is.na(training)) == 0)
+training <- training[, goodCols]
+testing <- testing[, goodCols]
+dim(training); dim(testing)
+```
+Final cleaned training data contains 19,622 observations and cleaned test data contains 20 observations.
+Both the training data and testing data have 54 variables (columns).
+
+## Correlation Matrix of the Training data.
+```{r}
+corrplot(cor(training[, -length(names(training))]), method="color", tl.cex=.5)
+```
+
+## Splitting of the Training Data
+Need to now split the clean training dataset into a training dataset and a validation dataset.  I will be splitting into 70% training and 30% for the validation dataset which we will conduct cross validation later.
+```{r}
+set.seed(12345)
+inTrain <- createDataPartition(training$classe, p=0.70, list=FALSE)
+validation <- training[-inTrain, ]
+training <- training[inTrain, ]
+dim(validation); dim(training)
+```
+We have 3 datasets now, Training with 13,737 observations, Validation with 5,885 observations and
+Testing dastset still has 20 observations.
+
+## Model Exploration
+### Decision Tree Model
+I will do a predictive model for activitiy recognition by doing a classification tree
+```{r}
+modelDecisionTree <- rpart(classe ~ ., data=training, method="class")
+prp(modelDecisionTree)
+```
+
+Now need to estimate the performance of this model using the validation dataset.
+```{r}
+predictDecisionTree <- predict(modelDecisionTree, validation, type="class")
+confusionMatrix(validation$classe, predictDecisionTree)
+accuracy <- postResample(predictDecisionTree, validation$classe)
+est_OSE <- 1 - as.numeric(confusionMatrix(validation$classe, predictDecisionTree)$overall[1])
+accuracy
+est_OSE
+```
+The estimated accuracy is 73.67884% and the estimated out-of sample error is 26.32116%.
+
+### Random Forest Model
+I will fit a predictive model for activity recognition using Random Forest whihc it automatically selects the important variables.  I will use 5-fold cross validation.
+```{r}
+modelRandomForest <- train(classe ~ ., data=training, method="rf", trControl=trainControl(method="cv", 5), ntree = 250)
+modelRandomForest
+```
+
+We need to now see what the performance is on the validation dataset.
+```{r}
+predictRandomForest <- predict(modelRandomForest, validation)
+confusionMatrix(validation$classe, predictRandomForest)
+accuracy <- postResample(predictRandomForest, validation$classe)
+est_OSE <- 1 - as.numeric(confusionMatrix(validation$classe, predictRandomForest)$overall[1])
+accuracy
+est_OSE
+```
+The estimated accuracy is 99.62617% and the estimated out-of sample error is 0.003738318%.
+
+# The Random Forest Model worked better than the Decision Tree Model!
+
+## Results - Prediction on Testing Set
+Applying the Random Forest to predict the outcome variable classe for the test set.
+```{r}
+predict(modelRandomForest, testing[, -length(names(testing))])
+```
